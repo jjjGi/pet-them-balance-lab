@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using PetThem.Combat;
@@ -15,6 +16,8 @@ public sealed class SimulationRequest
     public string OutputDirectory { get; init; } = "";
     public bool WriteLogs { get; init; } = true;
     public string BuildVersion { get; init; } = "0.1.0";
+    /// <summary>Short human note about why this experiment was run. Shown in comparisons and reports.</summary>
+    public string Label { get; init; } = "";
 }
 
 public sealed record RunResult(
@@ -27,9 +30,15 @@ public sealed record SimulationAggregates(
     double meanHealthRemaining, double meanDamageTaken, int runsWithoutDamage);
 
 public sealed record SimulationSummary(
-    string schemaVersion, string source, string policy, string policyDescription, string limitation,
-    string configPath, string configVersion, BalanceConfig config,
-    SimulationAggregates aggregates, IReadOnlyList<RunResult> results, string? summaryPath);
+    string schemaVersion, string experimentId, string createdUtc, string label,
+    string source, string policy, string policyDescription, string limitation,
+    string configPath, string configVersion, int seed, BalanceConfig config,
+    SimulationAggregates aggregates, IReadOnlyList<RunResult> results, string? summaryPath)
+{
+    /// <summary>The seeds this experiment ran, in order. Two experiments are only comparable on shared seeds.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<int> Seeds => results.Select(result => result.seed).ToArray();
+}
 
 /// <summary>Runs the shared combat rules with a bot policy and records the result.</summary>
 /// <remarks>The CLI and the MCP server both call this, so both produce identical logs.</remarks>
@@ -68,13 +77,19 @@ public static class SimulationRunner
             results.Average(r => (double)r.damageTaken),
             results.Count(r => r.damageTaken <= 0));
 
-        var summary = new SimulationSummary("1", "simulation", policy.Id, policy.Description, Limitation,
-            request.ConfigPath, request.Config.version, request.Config, aggregates, results, null);
+        DateTime now = DateTime.UtcNow;
+        string experimentId = "exp-" + now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)
+            + "-" + policy.Id + "-" + Guid.NewGuid().ToString("N")[..6];
+
+        var summary = new SimulationSummary("1", experimentId,
+            now.ToString("o", CultureInfo.InvariantCulture), request.Label,
+            "simulation", policy.Id, policy.Description, Limitation,
+            request.ConfigPath, request.Config.version, request.Seed, request.Config,
+            aggregates, results, null);
 
         if (!request.WriteLogs) return summary;
 
-        string summaryPath = Path.Combine(request.OutputDirectory,
-            "summary-" + Guid.NewGuid().ToString("N")[..8] + ".json");
+        string summaryPath = Path.Combine(request.OutputDirectory, experimentId + ".json");
         summary = summary with { summaryPath = summaryPath };
         File.WriteAllText(summaryPath, JsonSerializer.Serialize(summary, ConfigStore.PrettyJson));
         return summary;

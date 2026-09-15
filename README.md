@@ -29,13 +29,16 @@ $env:PETTHEM_GAME_ROOT = 'D:/somewhere/PetThemGame'
 | 기능 | 상태 |
 | --- | --- |
 | MCP stdio 서버 | 동작 |
-| `get_lab_status` / `get_balance_config` / `list_bot_policies` / `run_simulation` / `read_run_log` | 동작 |
-| 봇 시뮬레이터 CLI | 동작 |
-| 실행 기록(JSONL) 읽기와 불완전 기록 판별 | 동작 |
-| `compare_experiments` / `analyze_playtests` / `create_balance_candidate` | 미구현 |
-| `Create_Balance_Report` HTML 보고서 | 미구현 |
+| 설정 조회 · 봇 정책 · 반복 실험 · 기록 읽기 | 동작 |
+| 실험 목록과 **시드끼리 짝지은** 비교 | 동작 |
+| 밸런스 후보 저장 (게임 설정은 건드리지 않음) | 동작 |
+| `Create_Balance_Report` 단일 파일 HTML 보고서 | 동작 |
+| `analyze_playtests` | 미구현 |
 
-실제 사람의 플레이 기록은 아직 하나도 없습니다. 그래서 플레이어 분석은 지금 불가능합니다.
+MCP 도구 10개가 동작하고 `analyze_playtests` 하나가 남았습니다.
+남은 이유는 기술이 아니라 데이터입니다. **실제 사람의 플레이 기록이 아직 0건**이라 읽을 대상이 없습니다.
+
+도구별 입력·출력과 한도는 [docs/mcp-tools.md](docs/mcp-tools.md)에 있습니다.
 
 ## 검증
 
@@ -45,8 +48,28 @@ $env:PETTHEM_GAME_ROOT = 'D:/somewhere/PetThemGame'
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
 ~~~
 
-검사 9개에는 MCP 서버를 실제 자식 프로세스로 띄워 `initialize` → `tools/list` → `tools/call`까지 주고받는 통신 검사가 포함됩니다.
-빌드가 되는지만 보는 검사가 아닙니다.
+검사 14개에는 이런 것들이 들어 있습니다.
+
+- MCP 서버를 실제 자식 프로세스로 띄워 `initialize` → `tools/list` → `tools/call`까지 주고받는 통신 검사.
+  빌드가 되는지만 보는 검사가 아닙니다.
+- `get_lab_status`가 `tools/list`에 없는 도구를 구현됐다고 주장하면 실패.
+- 보고서가 외부 리소스를 전혀 참조하지 않고, 데이터에서 온 문자열을 이스케이프하는지.
+- 비교가 정말 시드끼리 짝지어 계산하는지, 비교 불가능한 조합을 거부하는지.
+- 밸런스 설정이 아닌 JSON을 조용히 기본값으로 읽지 않는지.
+
+## MCP로 한 바퀴 돌려보기
+
+~~~powershell
+dotnet build src/McpServer -c Release
+
+./scripts/mcp-call.ps1 run_simulation '{"runs":5,"seed":42,"label":"기준","outputDirectory":"demo"}'
+./scripts/mcp-call.ps1 list_experiments '{"limit":5}'
+./scripts/mcp-call.ps1 create_balance_candidate '{"changes":"{\"punchRange\":1.8}","rationale":"왜 바꾸는지"}'
+./scripts/mcp-call.ps1 compare_experiments '{"baseline":"exp-...","candidate":"exp-..."}'
+./scripts/mcp-call.ps1 Create_Balance_Report '{"baselineExperimentId":"exp-...","outputPath":"balance-01.html"}'
+~~~
+
+보고서는 `reports/` 아래에 생기고 브라우저로 그냥 열면 됩니다. 서버도 인터넷도 필요 없습니다.
 
 ## 시뮬레이터 실행
 

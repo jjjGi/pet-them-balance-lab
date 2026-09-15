@@ -23,20 +23,22 @@ public sealed class BalanceTools
         labRoot = Workspace.LabRoot,
         defaultConfigPath = Workspace.DefaultConfigPath,
         experimentsRoot = Workspace.ExperimentsRoot,
+        reportsRoot = Workspace.ReportsRoot,
+        candidatesRoot = CandidateStore.Root,
         missingPaths = Workspace.MissingPaths(),
         implemented = new[]
         {
             "get_lab_status", "get_balance_config", "list_bot_policies", "run_simulation", "read_run_log",
+            "list_experiments", "compare_experiments", "create_balance_candidate",
+            "list_balance_candidates", "Create_Balance_Report",
         },
-        notImplementedYet = new[]
-        {
-            "compare_experiments", "analyze_playtests", "create_balance_candidate", "Create_Balance_Report",
-        },
+        notImplementedYet = new[] { "analyze_playtests" },
         notes = new[]
         {
             "Simulated runs use deterministic bot policies and are not evidence about human difficulty.",
-            "No human playtest logs have been recorded yet, so player analysis is not possible.",
-            "Writes are limited to the experiments directory under labRoot.",
+            "No human playtest logs have been recorded yet, so analyze_playtests would have nothing to read.",
+            "Writes are limited to the experiments, reports and candidates directories under labRoot.",
+            "create_balance_candidate never edits the game's balance config; applying a candidate is a separate human step.",
         },
     });
 
@@ -77,7 +79,8 @@ public sealed class BalanceTools
         [Description("Bot policy id from list_bot_policies. Defaults to orbit-auto-punch-v1.")] string? policy = null,
         [Description("Optional balance config path. Defaults to the game repository's balance-default.json.")] string? configPath = null,
         [Description("Output folder name under the lab's experiments directory. Paths outside it are rejected.")] string? outputDirectory = null,
-        [Description("Write JSONL logs and a summary file. Set false for a quick answer with no files on disk.")] bool writeLogs = true)
+        [Description("Write JSONL logs and a summary file. Set false for a quick answer with no files on disk.")] bool writeLogs = true,
+        [Description("Short note about why this experiment was run. Shown in comparisons and reports.")] string? label = null)
         => Respond(() =>
     {
         string path = ConfigStore.ResolvePath(configPath);
@@ -94,8 +97,86 @@ public sealed class BalanceTools
             Seed = seed,
             OutputDirectory = output,
             WriteLogs = writeLogs,
+            Label = label ?? "",
         });
     });
+
+    [McpServerTool(Name = "list_experiments")]
+    [Description("Lists stored experiments newest first, with the id, policy, config version and headline " +
+                 "numbers. Use this to find ids for compare_experiments and Create_Balance_Report.")]
+    public static string ListExperiments(
+        [Description("Maximum number of experiments to return.")] int limit = 25)
+        => Respond(() => new
+        {
+            experimentsRoot = Workspace.ExperimentsRoot,
+            experiments = ExperimentStore.List(limit: limit),
+        });
+
+    [McpServerTool(Name = "compare_experiments")]
+    [Description("Compares two experiments seed by seed and reports how each metric moved. Refuses to " +
+                 "compare runs that are not comparable (different policy, run length, or no shared seeds) " +
+                 "instead of returning a misleading difference.")]
+    public static string CompareExperiments(
+        [Description("Experiment id or summary file path used as the baseline.")] string baseline,
+        [Description("Experiment id or summary file path being evaluated against the baseline.")] string candidate)
+        => Respond(() => ExperimentStore.Compare(
+            ExperimentStore.Load(baseline), ExperimentStore.Load(candidate)));
+
+    [McpServerTool(Name = "create_balance_candidate")]
+    [Description("Saves a proposed balance change as a new candidate file with its rationale. Never edits " +
+                 "the game's balance config; applying a candidate to the game is a separate human step. " +
+                 "The candidate is validated against the combat rules before it is stored.")]
+    public static string CreateBalanceCandidate(
+        [Description("Field changes as a JSON object of balance field name to new number, " +
+                     "for example {\"punchRange\": 2.0, \"gruntSpeed\": 1.6}.")]
+        string changes,
+        [Description("Why this change is being proposed, and what it is expected to affect.")] string rationale,
+        [Description("Optional base config path. Defaults to the game's balance-default.json.")] string? baseConfigPath = null,
+        [Description("Optional candidate id. Letters, digits, '-' and '_' only. Generated when omitted.")] string? candidateId = null)
+        => Respond(() =>
+    {
+        Dictionary<string, double> parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<Dictionary<string, double>>(changes, ConfigStore.Json)
+                ?? throw new ArgumentException("changes is empty.");
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException(
+                $"changes must be a JSON object of field name to number. {exception.Message}");
+        }
+        return CandidateStore.Create(parsed, rationale, baseConfigPath, candidateId);
+    });
+
+    [McpServerTool(Name = "list_balance_candidates")]
+    [Description("Lists saved balance candidates with their changes and rationale.")]
+    public static string ListBalanceCandidates() => Respond(() => new
+    {
+        candidatesRoot = CandidateStore.Root,
+        editableFields = CandidateStore.EditableFields,
+        candidates = CandidateStore.List(),
+    });
+
+    [McpServerTool(Name = "Create_Balance_Report")]
+    [Description("Writes a self-contained HTML balance report from recorded experiments. Opens with no " +
+                 "internet connection and no server. Every figure is computed from the runs, and the " +
+                 "report states what the data cannot answer instead of filling the gap.")]
+    public static string CreateBalanceReport(
+        [Description("Experiment id used as the baseline.")] string baselineExperimentId,
+        [Description("Report title shown at the top of the page.")] string? title = null,
+        [Description("Comma-separated experiment ids to compare against the baseline.")] string? candidateExperimentIds = null,
+        [Description("The question this report should answer, in plain language.")] string? question = null,
+        [Description("Output file name under the reports directory. Generated when omitted.")] string? outputPath = null)
+        => Respond(() => ReportGenerator.Create(new ReportRequest
+        {
+            Title = string.IsNullOrWhiteSpace(title) ? "PET THEM! 밸런스 보고서" : title,
+            BaselineExperimentId = baselineExperimentId,
+            CandidateExperimentIds = (candidateExperimentIds ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            Question = question ?? "",
+            OutputPath = outputPath,
+        }));
 
     [McpServerTool(Name = "read_run_log")]
     [Description("Reads one JSONL run log and reports what it actually contains: event counts, kills, damage, " +

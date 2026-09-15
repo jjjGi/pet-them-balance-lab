@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1",
+  "candidateId": "cand-contact-probe",
+  "createdUtc": "2026-09-15T19:30:00.9239750Z",
+  "rationale": "\uBD07\uC774 \uC804\uD600 \uB9DE\uC9C0 \uC54A\uC544 \uC704\uD5D8\uC774 \uC5C6\uB2E4. \uD380\uCE58 \uC0AC\uAC70\uB9AC\uC640 \uC18D\uB3C4\uB97C \uC904\uC774\uACE0 \uC801 \uC774\uB3D9 \uC18D\uB3C4\uB97C \uC62C\uB824 \uC811\uCD09\uC774 \uC2E4\uC81C\uB85C \uBC1C\uC0DD\uD558\uB294\uC9C0 \uBCF8\uB2E4. \uC0AC\uB78C \uC870\uC791 \uD655\uC778 \uC804\uC758 \uD0D0\uC0C9\uC6A9 \uD6C4\uBCF4\uB2E4.",
+  "baseConfigPath": "D:\\Project\\PetThemGame\\game\\Assets\\Resources\\balance-default.json",
+  "baseVersion": "prototype-0.1",
+  "version": "prototype-0.1\u002Bcand-contact-probe",
+  "changes": [
+    {
+      "field": "punchRange",
+      "from": 2.5999999046325684,
+      "to": 1.8
+    },
+    {
+      "field": "punchCooldown",
+      "from": 0.3799999952316284,
+      "to": 0.5
+    },
+    {
+      "field": "gruntSpeed",
+      "from": 1.25,
+      "to": 1.9
+    },
+    {
+      "field": "runnerSpeed",
+      "from": 2.1500000953674316,
+      "to": 3
+    }
+  ],
+  "config": {
+    "version": "prototype-0.1\u002Bcand-contact-probe",
+    "duration": 180,
+    "arenaHalfWidth": 14,
+    "arenaHalfHeight": 8,
+    "playerHealth": 100,
+    "playerSpeed": 4.5,
+    "punchDamage": 26,
+    "punchRange": 1.8,
+    "punchCooldown": 0.5,
+    "punchKnockback": 1.5,
+    "petDamage": 12,
+    "petRange": 7,
+    "petCooldown": 0.9,
+    "gruntHealth": 32,
+    "gruntSpeed": 1.9,
+    "runnerHealth": 18,
+    "runnerSpeed": 3,
+    "contactDamage": 10,
+    "hurtCooldown": 0.65,
+    "spawnInterval": 1.3,
+    "minSpawnInterval": 0.35,
+    "waveDuration": 30,
+    "maxEnemies": 100
+  },
+  "path": "D:\\Project\\PetThemBalanceLab\\candidates\\cand-contact-probe.json"
+}

@@ -19,3 +19,5 @@
 # OS
 .DS_Store
 Thumbs.db
+# Candidate balance proposals ARE committed: they are the record of what was
+# proposed and why. Only generated experiment output and reports are excluded.

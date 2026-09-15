@@ -9,6 +9,11 @@ public sealed record RunLogSummary(
     IReadOnlyDictionary<string, int> eventCounts, int killEvents, double damageDealt, double damageTaken,
     string? endReason, double? endTimeSeconds, int? endKills, bool complete, IReadOnlyList<string> warnings);
 
+/// <summary>One recorded snapshot: what the run looked like at that moment.</summary>
+public sealed record TimelinePoint(double time, double health, int alive, double kills);
+
+public sealed record RunTimeline(int seed, string path, IReadOnlyList<TimelinePoint> points);
+
 /// <summary>Reads run logs back so reported numbers can be traced to the recorded events.</summary>
 /// <remarks>
 /// A log without a <c>run_end</c> line is incomplete, not a death: the process may have been killed.
@@ -93,6 +98,36 @@ public static class RunLogReader
         return new RunLogSummary(full, info.Length, runId, source, policy, seed, configVersion, buildVersion,
             events, counts, killEvents, damageDealt, damageTaken, endReason, endTime, endKills,
             runId is not null && endReason is not null, warnings);
+    }
+
+    /// <summary>
+    /// Extracts the recorded snapshots as a time series. Charts are drawn from these points only,
+    /// so nothing in a report is interpolated from a number that was never written down.
+    /// </summary>
+    public static RunTimeline ReadTimeline(string path, int seed)
+    {
+        string full = PathGuard.ResolveInputFile(path);
+        var points = new List<TimelinePoint>();
+        foreach (string line in File.ReadLines(full))
+        {
+            if (line.Length == 0 || !line.Contains("\"snapshot\"", StringComparison.Ordinal)) continue;
+            JsonElement element;
+            try
+            {
+                element = JsonDocument.Parse(line).RootElement;
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+            if (Text(element, "type") != "snapshot") continue;
+            points.Add(new TimelinePoint(
+                Number(element, "time") ?? 0,
+                Number(element, "health") ?? 0,
+                Integer(element, "alive") ?? 0,
+                Number(element, "value") ?? 0));
+        }
+        return new RunTimeline(seed, full, points);
     }
 
     private static string? ConfigVersion(string? configJson, List<string> warnings)

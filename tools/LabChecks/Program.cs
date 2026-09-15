@@ -5,7 +5,11 @@ using PetThem.Combat;
 
 // Checks for the balance lab. No test package needed, same style as the game repository's CoreChecks.
 string scratch = Path.Combine(Path.GetTempPath(), "petthem-lab-checks-" + Guid.NewGuid().ToString("N")[..8]);
+// Experiment lookup by id only searches the experiments root, so checks that exercise it must
+// write there. Both directories are removed at the end.
+string labScratch = Path.Combine(Workspace.ExperimentsRoot, "lab-checks-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(scratch);
+Directory.CreateDirectory(labScratch);
 int passed = 0;
 try
 {
@@ -117,6 +121,149 @@ try
         True(!string.IsNullOrWhiteSpace(config.version));
     });
 
+    Check("a file that is not a balance config is rejected instead of silently defaulting", () =>
+    {
+        // A candidate file shares none of BalanceConfig's field names, so a lenient reader would
+        // deserialize it into an all-defaults config and run the wrong numbers without saying so.
+        string decoy = Path.Combine(scratch, "decoy.json");
+        File.WriteAllText(decoy, "{\"somethingElse\":1,\"nested\":{\"duration\":5}}");
+        Throws(() => ConfigStore.Load(decoy));
+        File.WriteAllText(decoy, "[1,2,3]");
+        Throws(() => ConfigStore.Load(decoy));
+    });
+
+    Check("a candidate records its changes, validates, and leaves the game config untouched", () =>
+    {
+        string before = File.ReadAllText(Workspace.DefaultConfigPath);
+        BalanceCandidate candidate = CandidateStore.Create(
+            new Dictionary<string, double> { ["punchRange"] = 1.8, ["maxEnemies"] = 60 },
+            "check fixture", write: false);
+
+        True(File.ReadAllText(Workspace.DefaultConfigPath) == before);
+        True(candidate.changes.Count == 2);
+        True(Math.Abs(candidate.config.punchRange - 1.8f) < 0.0001);
+        True(candidate.config.maxEnemies == 60);
+        True(candidate.config.version.StartsWith(candidate.baseVersion, StringComparison.Ordinal));
+        True(candidate.config.version != candidate.baseVersion);
+        True(candidate.path is null);
+
+        // A candidate file can be handed straight back to the simulator.
+        string configFile = CandidateStore.WriteConfigFile(candidate, Path.Combine(scratch, "candidate-config"));
+        BalanceConfig reloaded = ConfigStore.Load(configFile);
+        True(Math.Abs(reloaded.punchRange - 1.8f) < 0.0001);
+    });
+
+    Check("a candidate that breaks the combat rules or names an unknown field is refused", () =>
+    {
+        Throws(() => CandidateStore.Create(new Dictionary<string, double>(), "empty", write: false));
+        Throws(() => CandidateStore.Create(new Dictionary<string, double> { ["punchRange"] = 1 }, " ", write: false));
+        Throws(() => CandidateStore.Create(
+            new Dictionary<string, double> { ["notAField"] = 1 }, "unknown field", write: false));
+        Throws(() => CandidateStore.Create(
+            new Dictionary<string, double> { ["punchCooldown"] = 0 }, "zero cooldown", write: false));
+        Throws(() => CandidateStore.Create(
+            new Dictionary<string, double> { ["punchRange"] = double.NaN }, "not finite", write: false));
+        Throws(() => CandidateStore.Create(
+            new Dictionary<string, double> { ["maxEnemies"] = 2.5 }, "fractional int", write: false));
+        Throws(() => CandidateStore.Create(
+            new Dictionary<string, double> { ["punchRange"] = 1 }, "bad id", candidateId: "../escape", write: false));
+    });
+
+    Check("comparing experiments pairs by seed and refuses incomparable pairs", () =>
+    {
+        string output = Path.Combine(labScratch, "compare");
+        SimulationSummary baseline = Simulate(BotPolicies.Default, runs: 4, seed: 42, duration: 25,
+            output: output, writeLogs: true);
+        SimulationSummary other = Simulate("still-auto-punch-v1", runs: 4, seed: 42, duration: 25,
+            output: output, writeLogs: true);
+        SimulationSummary shorter = Simulate(BotPolicies.Default, runs: 4, seed: 42, duration: 20,
+            output: output, writeLogs: true);
+        SimulationSummary elsewhere = Simulate(BotPolicies.Default, runs: 4, seed: 900, duration: 25,
+            output: output, writeLogs: true);
+
+        True(!ExperimentStore.Compare(baseline, other).comparable);
+        True(!ExperimentStore.Compare(baseline, shorter).comparable);
+        True(!ExperimentStore.Compare(baseline, elsewhere).comparable);
+        True(!ExperimentStore.Compare(baseline, baseline).comparable);
+
+        BalanceConfig changed = ConfigStore.LoadDefault();
+        changed.duration = 25;
+        changed.punchRange = 1.6f;
+        SimulationSummary candidate = SimulationRunner.Run(new SimulationRequest
+        {
+            Config = changed, ConfigPath = Workspace.DefaultConfigPath, PolicyId = BotPolicies.Default,
+            Runs = 4, Seed = 42, OutputDirectory = output, WriteLogs = true,
+        });
+
+        ComparisonResult comparison = ExperimentStore.Compare(baseline, candidate);
+        True(comparison.comparable);
+        True(comparison.sharedSeeds.Count == 4);
+        True(comparison.configDifferences.Any(difference => difference.StartsWith("punchRange", StringComparison.Ordinal)));
+
+        MetricDelta kills = comparison.metrics.First(metric => metric.metric == "kills");
+        IReadOnlyList<SeedDelta> perSeed = comparison.perSeed["kills"];
+        True(perSeed.Count == 4);
+        foreach (SeedDelta delta in perSeed)
+        {
+            True(Math.Abs(delta.baseline - baseline.results.First(r => r.seed == delta.seed).kills) < 0.0001);
+            True(Math.Abs(delta.candidate - candidate.results.First(r => r.seed == delta.seed).kills) < 0.0001);
+            True(Math.Abs(delta.delta - (delta.candidate - delta.baseline)) < 0.0001);
+        }
+        Near(kills.meanDelta, perSeed.Average(delta => delta.delta));
+        True(kills.seedsIncreased + kills.seedsDecreased + kills.seedsUnchanged == 4);
+
+        // Stored experiments are findable by id, which is what the report and the MCP tools use.
+        True(ExperimentStore.Load(baseline.experimentId).experimentId == baseline.experimentId);
+        Throws(() => ExperimentStore.Load("exp-does-not-exist"));
+    });
+
+    Check("the report is one self-contained file and escapes text taken from the data", () =>
+    {
+        const string hostile = "</script><img src=x onerror=\"alert('xss')\">&";
+        string output = Path.Combine(labScratch, "report-runs");
+        BalanceConfig config = ConfigStore.LoadDefault();
+        config.duration = 20;
+        SimulationSummary baseline = SimulationRunner.Run(new SimulationRequest
+        {
+            Config = config, ConfigPath = Workspace.DefaultConfigPath, Runs = 2, Seed = 42,
+            OutputDirectory = output, WriteLogs = true, Label = hostile,
+        });
+
+        ReportResult report = ReportGenerator.Create(new ReportRequest
+        {
+            Title = hostile,
+            BaselineExperimentId = baseline.experimentId,
+            Question = hostile,
+            OutputPath = "lab-check-report.html",
+        });
+
+        string html = File.ReadAllText(report.path);
+        True(report.path.StartsWith(Workspace.ReportsRoot, StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains(hostile, StringComparison.Ordinal));
+        True(!html.Contains("onerror=\"alert", StringComparison.Ordinal));
+        True(html.Contains("&lt;img src=x", StringComparison.Ordinal));
+
+        // Opening the file must not reach the network or run a script.
+        True(!html.Contains("http://", StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains("https://", StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains("<script", StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains("<link", StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains("<iframe", StringComparison.OrdinalIgnoreCase));
+        True(!html.Contains("@import", StringComparison.OrdinalIgnoreCase));
+
+        True(html.Contains("<svg", StringComparison.Ordinal));
+        True(html.Contains("id=\"unknown\"", StringComparison.Ordinal));
+        True(report.missingData.Count > 0);
+        True(report.findings.Count > 0);
+        True(html.Contains(baseline.experimentId, StringComparison.Ordinal));
+
+        Throws(() => ReportGenerator.Create(new ReportRequest
+        {
+            BaselineExperimentId = baseline.experimentId,
+            OutputPath = "../escape.html",
+        }));
+    });
+
     Check("the MCP server answers initialize, tools/list and tools/call over stdio", () =>
     {
         string[] requests =
@@ -136,11 +283,21 @@ try
         string[] tools = responses[2].GetProperty("result").GetProperty("tools")
             .EnumerateArray().Select(tool => tool.GetProperty("name").GetString() ?? "").ToArray();
         foreach (string expected in new[]
-                 { "get_lab_status", "get_balance_config", "list_bot_policies", "run_simulation", "read_run_log" })
+                 {
+                     "get_lab_status", "get_balance_config", "list_bot_policies", "run_simulation",
+                     "read_run_log", "list_experiments", "compare_experiments",
+                     "create_balance_candidate", "list_balance_candidates", "Create_Balance_Report",
+                 })
             True(tools.Contains(expected));
 
         JsonElement status = ToolPayload(responses[3]);
         True(status.GetProperty("missingPaths").GetArrayLength() == 0);
+
+        // The status tool must not claim a tool that tools/list does not expose.
+        foreach (JsonElement claimed in status.GetProperty("implemented").EnumerateArray())
+            True(tools.Contains(claimed.GetString() ?? ""));
+        foreach (JsonElement pending in status.GetProperty("notImplementedYet").EnumerateArray())
+            True(!tools.Contains(pending.GetString() ?? ""));
 
         JsonElement simulation = ToolPayload(responses[4]);
         True(simulation.GetProperty("results").GetArrayLength() == 1);
@@ -155,7 +312,10 @@ try
 }
 finally
 {
-    try { Directory.Delete(scratch, true); } catch (IOException) { /* leave the copy behind for inspection */ }
+    foreach (string directory in new[] { scratch, labScratch })
+        try { Directory.Delete(directory, true); } catch (IOException) { /* leave it for inspection */ }
+    try { File.Delete(Path.Combine(Workspace.ReportsRoot, "lab-check-report.html")); }
+    catch (IOException) { /* leave it for inspection */ }
 }
 return;
 
