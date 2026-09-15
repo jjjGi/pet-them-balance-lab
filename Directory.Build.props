@@ -1,0 +1,11 @@
+<Project>
+  <!-- The combat rules have a single source of truth in the game repository.
+       This repository compiles that source instead of copying it.
+       Override with the PETTHEM_GAME_ROOT environment variable or -p:PetThemGameRoot=... -->
+  <PropertyGroup>
+    <PetThemGameRoot Condition="'$(PetThemGameRoot)' == '' and '$(PETTHEM_GAME_ROOT)' != ''">$(PETTHEM_GAME_ROOT)</PetThemGameRoot>
+    <PetThemGameRoot Condition="'$(PetThemGameRoot)' == ''">$(MSBuildThisFileDirectory)../PetThemGame</PetThemGameRoot>
+    <PetThemCombatSource>$(PetThemGameRoot)/packages/com.petthem.combat-core/Runtime</PetThemCombatSource>
+    <PetThemDefaultConfig>$(PetThemGameRoot)/game/Assets/Resources/balance-default.json</PetThemDefaultConfig>
+  </PropertyGroup>
+</Project>

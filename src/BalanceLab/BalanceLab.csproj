@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>PetThem.BalanceLab</AssemblyName>
+    <RootNamespace>PetThem.BalanceLab</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CombatCore/CombatCore.csproj" />
+  </ItemGroup>
+  <!-- Build-time paths, so the CLI and the MCP server find the game repository at runtime. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadata">
+      <_Parameter1>PetThemGameRoot</_Parameter1>
+      <_Parameter2>$(PetThemGameRoot)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadata">
+      <_Parameter1>PetThemLabRoot</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)../..</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

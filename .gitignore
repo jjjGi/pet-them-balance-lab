@@ -1,0 +1,21 @@
+# .NET / IDE
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.csproj.user
+*.suo
+*.user
+# Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Generated output
+/experiments/
+/reports/
+/local-data/
+# OS
+.DS_Store
+Thumbs.db

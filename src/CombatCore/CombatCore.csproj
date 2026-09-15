@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>PetThem.Combat</AssemblyName>
+    <RootNamespace>PetThem.Combat</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <Target Name="RequireCombatSource" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(PetThemCombatSource)')"
+           Text="Combat core source not found at '$(PetThemCombatSource)'. Clone the game repository (jjjGi/pet-them) next to this one, or set PETTHEM_GAME_ROOT to its path." />
+  </Target>
+  <ItemGroup>
+    <Compile Include="$(PetThemCombatSource)/**/*.cs" />
+  </ItemGroup>
+</Project>
