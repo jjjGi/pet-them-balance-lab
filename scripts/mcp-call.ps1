@@ -32,11 +32,18 @@ $info.RedirectStandardInput = $true
 $info.RedirectStandardOutput = $true
 $info.RedirectStandardError = $true
 $info.UseShellExecute = $false
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$info.StandardOutputEncoding = $utf8
+$info.StandardErrorEncoding = $utf8
 $process = [System.Diagnostics.Process]::Start($info)
+# Windows PowerShell 5.1 has no StandardInputEncoding property. Write UTF-8 directly
+# through a writer on the redirected stream, so Korean titles and file paths survive.
+$inputWriter = New-Object System.IO.StreamWriter($process.StandardInput.BaseStream, $utf8)
+$stderrTask = $process.StandardError.ReadToEndAsync()
 
 try {
-    foreach ($request in $requests) { $process.StandardInput.WriteLine($request) }
-    $process.StandardInput.Flush()
+    foreach ($request in $requests) { $inputWriter.WriteLine($request) }
+    $inputWriter.Flush()
 
     # A real client keeps stdin open while it waits. Closing it early shuts the transport
     # down before the server has written its replies.
@@ -49,12 +56,12 @@ try {
         if ($message.id -eq 2) { $answer = $message }
     }
 } finally {
-    $process.StandardInput.Close()
+    $inputWriter.Dispose()
     $null = $process.WaitForExit(30000)
     if (-not $process.HasExited) { $process.Kill() }
 }
 
-if ($null -eq $answer) { throw "No response for $Tool. stderr: $($process.StandardError.ReadToEnd())" }
+if ($null -eq $answer) { throw "No response for $Tool. stderr: $($stderrTask.Result)" }
 if ($answer.error) { throw "MCP error for ${Tool}: $($answer.error.message)" }
 
 $text = $answer.result.content[0].text

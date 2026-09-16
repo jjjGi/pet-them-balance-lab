@@ -13,6 +13,7 @@ Directory.CreateDirectory(labScratch);
 int passed = 0;
 try
 {
+    PlaytestChecks.Run(Check, scratch);
     Check("output paths stay inside the experiments directory", () =>
     {
         string root = Workspace.ExperimentsRoot;
@@ -275,6 +276,11 @@ try
             "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"run_simulation\",\"arguments\":{\"runs\":1,\"seed\":42,\"writeLogs\":false}}}",
             "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"run_simulation\",\"arguments\":{\"runs\":1,\"seed\":42,\"outputDirectory\":\"../../escape\"}}}",
         };
+        requests = requests.Append(Json(new
+        {
+            jsonrpc = "2.0", id = 6, method = "tools/call",
+            @params = new { name = "analyze_playtests", arguments = new { paths = new[] { Path.Combine(scratch, "client-death.jsonl") } } }
+        })).ToArray();
         Dictionary<int, JsonElement> responses = Handshake(McpServerExecutable(), requests);
 
         JsonElement initialize = responses[1].GetProperty("result");
@@ -286,7 +292,7 @@ try
                  {
                      "get_lab_status", "get_balance_config", "list_bot_policies", "run_simulation",
                      "read_run_log", "list_experiments", "compare_experiments",
-                     "create_balance_candidate", "list_balance_candidates", "Create_Balance_Report",
+                     "create_balance_candidate", "list_balance_candidates", "Create_Balance_Report", "analyze_playtests",
                  })
             True(tools.Contains(expected));
 
@@ -306,6 +312,9 @@ try
 
         JsonElement rejected = ToolPayload(responses[5]);
         True(rejected.GetProperty("error").GetString() == nameof(ArgumentException));
+        JsonElement playtest = ToolPayload(responses[6]);
+        True(playtest.GetProperty("includedRuns").GetInt32() == 1);
+        True(playtest.GetProperty("groups")[0].GetProperty("intervals")[1].GetProperty("deaths").GetInt32() == 1);
     });
 
     Console.WriteLine(passed + " checks passed.");

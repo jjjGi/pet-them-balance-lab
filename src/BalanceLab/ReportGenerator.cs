@@ -7,7 +7,9 @@ namespace PetThem.BalanceLab;
 public sealed class ReportRequest
 {
     public string Title { get; init; } = "PET THEM! 밸런스 보고서";
-    public required string BaselineExperimentId { get; init; }
+    public string? BaselineExperimentId { get; init; }
+    public IReadOnlyList<string> PlaytestPaths { get; init; } = Array.Empty<string>();
+    public int IntervalSeconds { get; init; } = 30;
     public IReadOnlyList<string> CandidateExperimentIds { get; init; } = Array.Empty<string>();
     /// <summary>The question this report is meant to answer, in the requester's own words.</summary>
     public string Question { get; init; } = "";
@@ -31,6 +33,22 @@ public static class ReportGenerator
 {
     public static ReportResult Create(ReportRequest request)
     {
+        if (request.PlaytestPaths.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(request.BaselineExperimentId) || request.CandidateExperimentIds.Count > 0)
+                throw new ArgumentException("Choose either playtestPaths or bot experiments for one report.");
+            PlaytestAnalysis analysis = PlaytestAnalyzer.Analyze(request.PlaytestPaths, request.IntervalSeconds);
+            string playtestDirectory = PathGuard.ResolveOutputDirectory(Path.GetDirectoryName(request.OutputPath), Workspace.ReportsRoot);
+            string fileName = FileName(request);
+            Directory.CreateDirectory(playtestDirectory);
+            string destination = Path.Combine(playtestDirectory, fileName);
+            File.WriteAllText(destination, PlaytestReport.Render(request, analysis), new UTF8Encoding(false));
+            return new(destination, request.Title, DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                Array.Empty<string>(), new[] { $"선택한 클라이언트 기록 {analysis.suppliedFiles}개 중 {analysis.includedRuns}회 포함, {analysis.excluded.Count}개 제외." },
+                analysis.limitations, new FileInfo(destination).Length);
+        }
+        if (string.IsNullOrWhiteSpace(request.BaselineExperimentId))
+            throw new ArgumentException("Supply baselineExperimentId or playtestPaths.");
         SimulationSummary baseline = ExperimentStore.Load(request.BaselineExperimentId);
         var candidates = request.CandidateExperimentIds.Select(ExperimentStore.Load).ToArray();
         var comparisons = candidates.Select(candidate => ExperimentStore.Compare(baseline, candidate)).ToArray();
@@ -151,7 +169,7 @@ public static class ReportGenerator
     {
         var missing = new List<string>
         {
-            "사람의 플레이 기록이 0건입니다. 실제 플레이어가 어디서 막히는지는 이 데이터로 알 수 없습니다.",
+            "이 보고서에 사람의 플레이 기록을 입력하지 않았습니다. 실제 플레이어가 어디서 막히는지는 이 봇 데이터로 알 수 없습니다.",
             "이 보고서의 모든 수치는 봇 시뮬레이션입니다. 반응 속도, 조준 정확도, 손의 피로를 흉내 내지 않습니다.",
             "무기는 펀치 하나뿐이고 펫도 1종입니다. 무기·펫 조합 분석은 대상이 없습니다.",
             "레벨업 선택지, 경험치, 상점, 재화가 아직 구현되지 않았습니다. 성장 정체 분석은 불가능합니다.",
@@ -186,7 +204,7 @@ public static class ReportGenerator
         if (!string.IsNullOrWhiteSpace(request.Question))
             page.Append("<p class=\"question\"><strong>질문:</strong> ").Append(E(request.Question)).Append("</p>");
         page.Append("<p class=\"banner\">이 보고서의 모든 수치는 <strong>봇 시뮬레이션</strong>에서 나왔습니다. ")
-            .Append("사람이 실제로 플레이한 기록은 아직 없습니다.</p>");
+            .Append("사람의 플레이 기록은 이 보고서에 포함하지 않았습니다.</p>");
         page.Append("</header><main>");
 
         page.Append("<section id=\"summary\"><h2>핵심 요약</h2><ol class=\"findings\">");
@@ -334,7 +352,7 @@ public static class ReportGenerator
     private static string Signed(double value) =>
         value.ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture);
 
-    private const string Css = """
+    internal const string Css = """
         :root {
           color-scheme: light dark;
           --bg: #ffffff; --fg: #1a1c1f; --muted: #5b6169; --line: #d9dde3;

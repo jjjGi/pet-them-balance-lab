@@ -30,13 +30,13 @@ public sealed class BalanceTools
         {
             "get_lab_status", "get_balance_config", "list_bot_policies", "run_simulation", "read_run_log",
             "list_experiments", "compare_experiments", "create_balance_candidate",
-            "list_balance_candidates", "Create_Balance_Report",
+            "list_balance_candidates", "Create_Balance_Report", "analyze_playtests",
         },
-        notImplementedYet = new[] { "analyze_playtests" },
+        notImplementedYet = Array.Empty<string>(),
         notes = new[]
         {
             "Simulated runs use deterministic bot policies and are not evidence about human difficulty.",
-            "No human playtest logs have been recorded yet, so analyze_playtests would have nothing to read.",
+            "analyze_playtests reads explicitly selected client logs; source labels are not proof of player identity.",
             "Writes are limited to the experiments, reports and candidates directories under labRoot.",
             "create_balance_candidate never edits the game's balance config; applying a candidate is a separate human step.",
         },
@@ -159,15 +159,17 @@ public sealed class BalanceTools
     });
 
     [McpServerTool(Name = "Create_Balance_Report")]
-    [Description("Writes a self-contained HTML balance report from recorded experiments. Opens with no " +
+    [Description("Writes a self-contained HTML balance report from bot experiments OR selected client playtest logs. Opens with no " +
                  "internet connection and no server. Every figure is computed from the runs, and the " +
                  "report states what the data cannot answer instead of filling the gap.")]
     public static string CreateBalanceReport(
-        [Description("Experiment id used as the baseline.")] string baselineExperimentId,
+        [Description("Bot experiment id used as baseline. Omit when playtestPaths is supplied.")] string? baselineExperimentId = null,
         [Description("Report title shown at the top of the page.")] string? title = null,
         [Description("Comma-separated experiment ids to compare against the baseline.")] string? candidateExperimentIds = null,
         [Description("The question this report should answer, in plain language.")] string? question = null,
-        [Description("Output file name under the reports directory. Generated when omitted.")] string? outputPath = null)
+        [Description("Output file name under the reports directory. Generated when omitted.")] string? outputPath = null,
+        [Description("1 to 50 explicit client JSONL paths. Choose this OR bot experiment ids; never both.")] string[]? playtestPaths = null,
+        [Description("Playtest time bin width, 5 to 120 seconds.")] int intervalSeconds = 30)
         => Respond(() => ReportGenerator.Create(new ReportRequest
         {
             Title = string.IsNullOrWhiteSpace(title) ? "PET THEM! 밸런스 보고서" : title,
@@ -176,7 +178,18 @@ public sealed class BalanceTools
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             Question = question ?? "",
             OutputPath = outputPath,
+            PlaytestPaths = playtestPaths ?? Array.Empty<string>(),
+            IntervalSeconds = intervalSeconds,
         }));
+
+    [McpServerTool(Name = "analyze_playtests")]
+    [Description("Analyzes selected source=human JSONL client logs. Separates build/platform/config groups, " +
+                 "counts deaths against runs reaching each time bin, and distinguishes abandoned/incomplete runs. " +
+                 "Excludes corrupt, duplicate and bot logs with reasons. Read-only; does not scan directories.")]
+    public static string AnalyzePlaytests(
+        [Description("1 to 50 explicit JSONL file paths; at most 64 MB each and 256 MB total.")] string[] paths,
+        [Description("Time bin width, 5 to 120 seconds. Default 30.")] int intervalSeconds = 30)
+        => Respond(() => PlaytestAnalyzer.Analyze(paths, intervalSeconds));
 
     [McpServerTool(Name = "read_run_log")]
     [Description("Reads one JSONL run log and reports what it actually contains: event counts, kills, damage, " +
